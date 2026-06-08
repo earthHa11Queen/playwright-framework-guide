@@ -1,0 +1,600 @@
+# ==============================================================================
+# Architecture Definition: JUnit OOM (Operation Object Model)
+# Author: Matsushita Daisuke
+# Version: 1.0.0
+# Description:
+#   A custom unit/module testing architecture adapted from Playwright's Page Object Model,
+#   ported from the Pytest OOM architecture to JUnit 5 (Jupiter).
+#   It enforces strict separation of concerns, loose typing for anomaly testing,
+#   and a call-only script style.
+#
+# Source Philosophy:
+#   Playwright (TS) -> Page Object Model (POM)
+#   Pytest  (Py)    -> Operation Object Model (OOM) v3.0.0
+#   JUnit   (Java)  -> Operation Object Model (OOM) v1.0.0  [this file]
+# ==============================================================================
+
+architecture_profile:
+  framework: "junit5"
+  target_language: "Java"
+  design_pattern_name: "Operation Object Model (OOM)"
+  junit_version: "5.10.x (Jupiter)"
+  core_philosophy: >
+    Treat internal modules/classes like UI Pages (from Playwright POM).
+    Wrap them (Wrapper) to abstract complexity and loosen type safety intentionally
+    using Object type to enable "Mirror Principle" (anomaly) testing.
+    Test scripts (Scenario) are call-only; no business logic instantiation inside test methods.
+
+# ------------------------------------------------------------------------------
+# 1. Directory & File Structure
+# ------------------------------------------------------------------------------
+structure_definition:
+  root: "src/test/java/{base_package}/"
+
+  # Unit Tests (Module Tests)
+  unit_layer:
+    path: "src/test/java/{base_package}/unit/"
+    description: "Tests that invoke internal classes/functions directly. No HTTP."
+    components:
+      - directory: "wrappers/"
+        role: "Operation Wrappers (The 'Pages' in POM)"
+        rule: >
+          Wraps target business logic class.
+          Handles type loosening (Object args) and optional input logic.
+          Hides constructor/dependency injection complexity.
+
+      - directory: "scenarios/"
+        role: "Test Scenarios (The 'Specs')"
+        rule: >
+          Contains JUnit @Test execution flow only.
+          No business logic instantiation or raw data manipulation inside @Test methods.
+
+  # Integration Tests (API Tests)
+  integration_layer:
+    path: "src/test/java/{base_package}/integration/"
+    description: "Tests that invoke external API endpoints via HTTP client."
+    components:
+      - directory: "wrappers/"
+        role: "API Client Wrappers"
+        rule: >
+          Wraps HTTP requests (GET/POST via RestAssured or HttpClient).
+          Abbreviates endpoint logic. Returns Object or Map for loose coupling.
+
+      - directory: "scenarios/"
+        role: "Test Scenarios"
+        rule: "End-to-End flows calling API wrappers only."
+
+  # Shared Resources
+  shared_layer:
+    - path: "src/test/java/{base_package}/utils/"
+      role: >
+        Common Utilities (Date calc, File I/O, custom assertion helpers).
+        Equivalent to Pytest utils/ and Playwright utils/.
+
+    - path: "src/test/resources/data/"
+      role: >
+        Test Data Storage (YAML/CSV/JSON).
+        Loaded by @MethodSource providers.
+        Equivalent to Pytest tests/data/ and Playwright values/.
+
+    - path: "src/test/java/{base_package}/fixtures/"
+      role: >
+        JUnit Extensions and shared setup/teardown logic.
+        Equivalent to Pytest conftest.py and Playwright customFixture.ts.
+        Implement as classes annotated with @ExtendWith or used in @RegisterExtension.
+
+    - path: "src/test/java/{base_package}/constants/"
+      role: >
+        Project-specific constants.
+        Equivalent to Playwright values/constants.ts.
+        Defines DONT_INPUT_VALUE and other skip/sentinel constants.
+
+# ------------------------------------------------------------------------------
+# 2. Component Responsibilities (The OOM Rules)
+# ------------------------------------------------------------------------------
+component_rules:
+
+  # [Wrapper] - The most important layer
+  wrapper:
+    definition: >
+      A proxy class that interfaces with the System Under Test (SUT).
+      Wraps exactly one target class or one API endpoint group.
+
+    java_class_conventions:
+      - "Class name suffix: Wrapper (e.g., UserModuleWrapper)"
+      - "One Wrapper class per one SUT class. 1:1 mapping."
+      - "Wrapper holds SUT instance as a private field."
+      - "Constructor performs dependency injection (mock injection via constructor args)."
+
+    mandatory_rules:
+      - rule_id: "LOOSE_TYPING"
+        description: "Intentionally loosen type safety to allow anomaly injection."
+        instruction: |
+          Method arguments MUST be typed as `Object`.
+          NEVER use strict types (e.g., int, UserDto) in wrapper method signatures.
+          Cast internally only when the operation strictly requires it.
+          This allows passing String "abc" to an int field to test error handling.
+
+          Bad example:
+            public boolean inputUserId(int userId) { ... }
+
+          Good example:
+            public boolean inputUserId(Object userId) { ... }
+
+      - rule_id: "INPUT_LOGIC"
+        description: "Handle optional/missing inputs dynamically."
+        instruction: |
+          Use `if (value != OomConstants.DONT_INPUT_VALUE)` blocks to build arguments.
+          Do not pass default values unless explicitly requested.
+          null MUST NOT be treated as skip; it means "intentionally pass null" (anomaly case).
+
+          Example:
+            public boolean inputUserName(Object value) {
+                if (value == OomConstants.DONT_INPUT_VALUE) {
+                    return true;
+                } else {
+                    String strValue = String.valueOf(value);
+                    this.sut.setUserName(strValue);
+                    return true;
+                }
+            }
+
+      - rule_id: "INSTANTIATION_HIDING"
+        description: "Hide the complex initialization of the target SUT class."
+        instruction: |
+          The Wrapper's constructor handles mock injection.
+          Use Mockito (@Mock, @InjectMocks) or manual constructor injection.
+          SUT is never instantiated inside @Test methods.
+
+      - rule_id: "BOOLEAN_RETURN"
+        description: "All wrapper methods return boolean for result aggregation."
+        instruction: |
+          Do NOT throw exceptions from wrapper methods.
+          Let JUnit assertions (assertThrows) handle expected exception cases in scenarios.
+          Wrapper methods return true on success, false on failure.
+          This mirrors Playwright's boolean return convention.
+
+      - rule_id: "IF_ELSE_MANDATORY"
+        description: "All if statements MUST have an else clause. No single-line if."
+        instruction: |
+          Bad example:
+            if (value != null) this.sut.setName(value.toString());
+
+          Good example:
+            if (value != null) {
+                this.sut.setName(value.toString());
+            } else {
+                // do nothing
+            }
+
+  # [Scenario] - The test script layer
+  scenario:
+    definition: "The executable JUnit 5 test class managed by the test runner."
+
+    java_class_conventions:
+      - "Class name prefix: Test (e.g., TestUserRegistration)"
+      - "Use @Nested to create at least 2 levels of grouping."
+      - "Structure: outer class -> @Nested middle class -> @Test methods."
+
+    mandatory_rules:
+      - rule_id: "CALL_ONLY"
+        description: "Test methods must only call Wrapper methods."
+        instruction: |
+          No SUT class instantiation inside @Test methods.
+          No raw HTTP calls inside @Test methods.
+          No data manipulation logic inside @Test methods.
+
+      - rule_id: "NO_LOOPS"
+        description: "Loops are prohibited inside @Test methods."
+        instruction: |
+          Use @MethodSource with Stream<Arguments> for data-driven testing.
+          Equivalent to Pytest's @pytest.mark.parametrize.
+
+          Example:
+            @ParameterizedTest
+            @MethodSource("provideUserData")
+            void testInputUserName(Object inputValue, boolean isNormal) {
+                boolean result = wrapper.inputUserName(inputValue);
+                assertEquals(isNormal, result);
+            }
+
+            static Stream<Arguments> provideUserData() {
+                return Stream.of(
+                    Arguments.of("valid_name",      true),
+                    Arguments.of("",                false),
+                    Arguments.of(12345,             false),   // int to String field (anomaly)
+                    Arguments.of(null,              false)    // null injection (anomaly)
+                );
+            }
+
+      - rule_id: "NESTED_GROUPING"
+        description: "Hierarchical organization using @Nested."
+        instruction: |
+          Use @Nested inner classes to represent at least 2 levels of grouping.
+          This is equivalent to Pytest's class nesting and Playwright's describe nesting.
+
+          Structure:
+            class TestUserModule {              // outer: SUT unit
+                @Nested
+                class TestRegistration {        // middle: feature group
+                    @Test
+                    void testNormalCase() { ... }
+
+                    @ParameterizedTest
+                    @MethodSource(...)
+                    void testAnomalyCases(...) { ... }
+                }
+
+                @Nested
+                class TestUpdate {
+                    @Test
+                    void testNormalCase() { ... }
+                }
+            }
+
+# ------------------------------------------------------------------------------
+# 3. Naming Conventions
+# ------------------------------------------------------------------------------
+naming_conventions:
+  files:
+    pattern: "PascalCase"
+    format: "Test{Category}{Detail}.java"
+    example: "TestUserRegistration.java"
+    purpose: "Ensure logical grouping. Category = SUT class name, Detail = feature."
+
+  wrappers:
+    pattern: "PascalCase"
+    suffix: "Wrapper"
+    example: "UserModuleWrapper.java"
+
+  test_classes:
+    outer:
+      pattern: "PascalCase"
+      prefix: "Test"
+      example: "TestUserModule"
+    nested:
+      annotation: "@Nested"
+      pattern: "PascalCase"
+      prefix: "Test"
+      example: "@Nested class TestRegistration"
+
+  test_methods:
+    pattern: "lowerCamelCase"
+    prefix: "test"
+    example: "testNormalInput / testAnomalyNullInput"
+
+  data_providers:
+    pattern: "lowerCamelCase"
+    suffix: "Data"
+    example: "provideUserNameData() -> @MethodSource(\"provideUserNameData\")"
+
+  constants:
+    pattern: "UPPER_SNAKE_CASE"
+    location: "constants/OomConstants.java"
+    example: "OomConstants.DONT_INPUT_VALUE"
+
+# ------------------------------------------------------------------------------
+# 4. Data Strategy
+# ------------------------------------------------------------------------------
+data_strategy:
+  format: "Stream<Arguments> via static provider methods"
+  source: >
+    Defined as static Stream<Arguments> methods in the same test class,
+    or in a dedicated DataProvider class under utils/.
+    External files (YAML/CSV) loaded via utility methods and converted to Stream<Arguments>.
+
+  injection: "@ParameterizedTest + @MethodSource"
+
+  validation: >
+    Each Arguments row includes an isNormal boolean flag or an expectedExceptionClass field.
+    Test logic branches on this flag:
+      - isNormal == true  -> assert normal result
+      - isNormal == false -> assertThrows or assert error state
+
+  mirror_principle_integration: >
+    Anomaly data (wrong types, null, boundary values) are injected as Object type arguments.
+    This directly enables the "Mirror Principle":
+    the same wrapper method handles both normal and anomaly inputs without modification.
+
+# ------------------------------------------------------------------------------
+# 5. Fixture Strategy (JUnit Extension Model)
+# ------------------------------------------------------------------------------
+fixture_strategy:
+  description: >
+    JUnit 5 uses Extensions (@ExtendWith) as the equivalent of Pytest's conftest.py fixtures.
+    Two categories of extensions are defined, mirroring Playwright's test/testB fixture split.
+
+  extension_types:
+    - name: "OomExtension (standard)"
+      annotation: "@ExtendWith(OomExtension.class)"
+      role: >
+        Standard setup/teardown. Initializes Mockito mocks (@Mock, @InjectMocks).
+        Equivalent to Pytest's @pytest.fixture and Playwright's base test fixture.
+      implementation_hint: |
+        public class OomExtension implements BeforeEachCallback, AfterEachCallback {
+            @Override
+            public void beforeEach(ExtensionContext ctx) {
+                MockitoAnnotations.openMocks(ctx.getRequiredTestInstance());
+            }
+        }
+
+    - name: "OomDebugExtension (debug)"
+      annotation: "@ExtendWith(OomDebugExtension.class)"
+      role: >
+        Debug mode extension. Enables verbose logging, captures method call traces.
+        Equivalent to Playwright's testB (Headless OFF) fixture.
+        Use only during local debugging; never commit @Test with this extension.
+
+# ------------------------------------------------------------------------------
+# 6. Constants Definition
+# ------------------------------------------------------------------------------
+constants_definition:
+  file: "constants/OomConstants.java"
+  description: >
+    Central constants file. Equivalent to Playwright's values/constants.ts
+    and Pytest's implicit skip sentinel values.
+
+  required_constants:
+    - name: "DONT_INPUT_VALUE"
+      type: "String"
+      value: "\"未入力文字列\""
+      purpose: >
+        Sentinel value to skip an input operation in a Wrapper method.
+        Mirrors Playwright's DONT_INPUT_VALUE constant.
+        MUST be used with reference equality check (==), not .equals().
+
+    - name: "DONT_INPUT_VALUE_STRICT"
+      type: "String"
+      value: "\"未入力文字列$$\""
+      purpose: "Collision-avoidance variant for edge cases."
+
+  implementation: |
+    package {base_package}.constants;
+
+    public final class OomConstants {
+
+        // Instantiation prohibited
+        private OomConstants() {}
+
+        /**
+         * Sentinel value to skip an input operation in a Wrapper method.
+         * Use with reference equality: value == OomConstants.DONT_INPUT_VALUE
+         */
+        public static final String DONT_INPUT_VALUE = "未入力文字列";
+
+        /**
+         * Collision-avoidance variant.
+         */
+        public static final String DONT_INPUT_VALUE_STRICT = "未入力文字列$$";
+    }
+
+# ------------------------------------------------------------------------------
+# 7. Code Samples (Golden Master)
+# ------------------------------------------------------------------------------
+code_samples:
+
+  wrapper_example:
+    file: "unit/wrappers/UserModuleWrapper.java"
+    description: >
+      Equivalent to Playwright's UserManagementPage.ts and Pytest's UserModuleWrapper.
+    code: |
+      package {base_package}.unit.wrappers;
+
+      import {base_package}.constants.OomConstants;
+      import com.example.app.service.UserService;  // SUT
+      import java.util.ArrayList;
+      import java.util.List;
+
+      public class UserModuleWrapper {
+
+          // SUT instance (injected via constructor)
+          private final UserService sut;
+
+          // ==========================================
+          // Constructor (Dependency Injection)
+          // Equivalent to Playwright's constructor(page: Page)
+          // ==========================================
+          public UserModuleWrapper(UserService sut) {
+              this.sut = sut;
+          }
+
+          // ==========================================
+          // Operation Methods (Loose Typing)
+          // Equivalent to Playwright's inputUserName(value: any)
+          // ==========================================
+
+          /**
+           * Sets the user name on the SUT.
+           * Accepts Object to allow anomaly injection (Mirror Principle).
+           */
+          public boolean inputUserName(Object value) {
+              if (value == OomConstants.DONT_INPUT_VALUE) {
+                  return true;
+              } else {
+                  String strValue = String.valueOf(value);
+                  this.sut.setUserName(strValue);
+                  return true;
+              }
+          }
+
+          public boolean inputUserId(Object value) {
+              if (value == OomConstants.DONT_INPUT_VALUE) {
+                  return true;
+              } else {
+                  // Intentionally no type check: anomaly injection allowed
+                  this.sut.setUserId(String.valueOf(value));
+                  return true;
+              }
+          }
+
+          // ==========================================
+          // Wrapper Method (Result Aggregation)
+          // Equivalent to Playwright's fillUserForm(dto: any)
+          // ==========================================
+          public boolean fillUserForm(Object userName, Object userId) {
+              List<Boolean> results = new ArrayList<>();
+              results.add(inputUserName(userName));
+              results.add(inputUserId(userId));
+              return results.stream().allMatch(r -> r);
+          }
+      }
+
+  scenario_example:
+    file: "unit/scenarios/TestUserModule.java"
+    description: >
+      Equivalent to Playwright's *.spec.ts and Pytest's test_*.py.
+    code: |
+      package {base_package}.unit.scenarios;
+
+      import {base_package}.unit.wrappers.UserModuleWrapper;
+      import {base_package}.constants.OomConstants;
+      import com.example.app.service.UserService;
+      import org.junit.jupiter.api.*;
+      import org.junit.jupiter.params.ParameterizedTest;
+      import org.junit.jupiter.params.provider.MethodSource;
+      import org.mockito.Mock;
+      import org.mockito.junit.jupiter.MockitoExtension;
+
+      import java.util.stream.Stream;
+      import org.junit.jupiter.params.provider.Arguments;
+
+      import static org.junit.jupiter.api.Assertions.*;
+
+      @ExtendWith(MockitoExtension.class)
+      @DisplayName("UserModule Tests")
+      class TestUserModule {
+
+          @Mock
+          private UserService mockUserService;
+
+          private UserModuleWrapper wrapper;
+
+          @BeforeEach
+          void setUp() {
+              // Wrapper instantiation in setUp, NOT in @Test
+              wrapper = new UserModuleWrapper(mockUserService);
+          }
+
+          // ==========================================
+          // @Nested: at least 2 levels of grouping
+          // Equivalent to Pytest class TestUser: class TestValidation:
+          // ==========================================
+          @Nested
+          @DisplayName("Registration Tests")
+          class TestRegistration {
+
+              @Test
+              @DisplayName("Normal: valid user name input")
+              void testNormalInput() {
+                  boolean result = wrapper.inputUserName("valid_name");
+                  assertTrue(result);
+              }
+
+              @Test
+              @DisplayName("Skip: DONT_INPUT_VALUE sentinel")
+              void testSkipInput() {
+                  boolean result = wrapper.inputUserName(OomConstants.DONT_INPUT_VALUE);
+                  assertTrue(result);
+              }
+
+              // Data-driven anomaly test
+              // Equivalent to @pytest.mark.parametrize
+              @ParameterizedTest(name = "[{index}] input={0}, isNormal={1}")
+              @MethodSource("provideUserNameData")
+              @DisplayName("Mirror Principle: anomaly injection")
+              void testAnomalyInput(Object inputValue, boolean isNormal) {
+                  boolean result = wrapper.inputUserName(inputValue);
+                  assertEquals(isNormal, result);
+              }
+
+              // Data provider
+              // Equivalent to Pytest fixture or parametrize list
+              static Stream<Arguments> provideUserNameData() {
+                  return Stream.of(
+                      Arguments.of("valid_name",                    true),
+                      Arguments.of("",                              true),   // empty string: anomaly input
+                      Arguments.of(null,                            true),   // null: anomaly input
+                      Arguments.of(12345,                           true),   // int: type anomaly
+                      Arguments.of(OomConstants.DONT_INPUT_VALUE,  true)    // skip sentinel
+                  );
+              }
+          }
+
+          @Nested
+          @DisplayName("Update Tests")
+          class TestUpdate {
+
+              @Test
+              @DisplayName("Normal: form fill aggregation")
+              void testFillForm() {
+                  boolean result = wrapper.fillUserForm("user_a", "001");
+                  assertTrue(result);
+              }
+          }
+      }
+
+  constants_example:
+    file: "constants/OomConstants.java"
+    code: |
+      package {base_package}.constants;
+
+      public final class OomConstants {
+          private OomConstants() {}
+          public static final String DONT_INPUT_VALUE        = "未入力文字列";
+          public static final String DONT_INPUT_VALUE_STRICT = "未入力文字列$$";
+      }
+
+# ------------------------------------------------------------------------------
+# 8. pom.xml Dependencies
+# ------------------------------------------------------------------------------
+pom_dependencies:
+  description: "Required Maven dependencies for JUnit OOM architecture."
+  dependencies:
+    - groupId: "org.junit.jupiter"
+      artifactId: "junit-jupiter"
+      version: "5.10.3"
+      scope: "test"
+      note: "JUnit 5 Jupiter API + Engine. Equivalent to pytest package."
+
+    - groupId: "org.mockito"
+      artifactId: "mockito-junit-jupiter"
+      version: "5.12.0"
+      scope: "test"
+      note: >
+        Mockito integration for JUnit 5.
+        Provides @Mock, @InjectMocks, MockitoExtension.
+        Equivalent to pytest-mock / unittest.mock.
+
+    - groupId: "org.junit.jupiter"
+      artifactId: "junit-jupiter-params"
+      version: "5.10.3"
+      scope: "test"
+      note: >
+        @ParameterizedTest, @MethodSource support.
+        Equivalent to @pytest.mark.parametrize.
+
+  maven_surefire_plugin:
+    note: >
+      JUnit 5 requires maven-surefire-plugin 3.0.0+ to execute @Test methods.
+      Add to pom.xml build/plugins section.
+    config: |
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.3.1</version>
+      </plugin>
+
+# ------------------------------------------------------------------------------
+# 9. Instructions for AI Agents
+# ------------------------------------------------------------------------------
+ai_instruction:
+  role: "Senior QA Architect specialized in OOM (Operation Object Model) for JUnit 5."
+  directive: |
+    When generating JUnit OOM code or explaining this architecture:
+    1. ALWAYS separate the "Logic" (Wrapper) from the "Execution" (Scenario).
+    2. ALWAYS use `Object` type in Wrapper method signatures to support "Mirror Principle" anomaly data.
+    3. NEVER put SUT class instantiation or HTTP requests inside @Test methods.
+    4. ALWAYS use @Nested for at least 2 levels of test grouping.
+    5. ALWAYS use @ParameterizedTest + @MethodSource instead of loops in @Test methods.
+    6. Interpret "Unit API Test" as "Module Test using Wrappers", not HTTP tests.
+    7. DONT_INPUT_VALUE MUST be checked with reference equality (==), not .equals().
