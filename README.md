@@ -2,6 +2,82 @@
 
 A design philosophy and architecture guide for building E2E test automation systems on top of Playwright.
 
+Born from **1,500+ test case implementations** in real SIer projects.
+
+---
+
+## About This Repository
+
+Playwright's official documentation explains how to use the API.
+What it doesn't cover is **how to design and operate a project at 1,500+ test cases.**
+
+This guide is a record of design philosophy and decisions,
+systematized from hands-on implementation experience in SIer projects —
+covering the architecture of the **entire test automation system** built on top of Playwright.
+
+Every guideline comes with its rationale:
+from directory structure and naming conventions,
+to data management and AI integration.
+
+---
+
+## Documents
+
+### 1. [Framework Design Philosophy](docs/01_framework-design.md)
+
+Design principles for a Playwright-based E2E test automation system.
+
+- Complete separation architecture between test scripts and Page Objects
+- Two-layer structure: Static Root (stable anchors) and Scope Switching (dynamic cursors)
+- Naming conventions: unified policy for `input~` / `check~` / `submit~` / `click~`
+- Test data management (CSV vs TypeScript objects — criteria for choosing)
+- Which work areas benefit most from Playwright + AI integration (completion, review, data generation, etc.)
+- Rules on loop usage and the requirement for at least two nested `describe` levels
+
+### 2. [Test Strategy](docs/02_test-strategy.md)
+
+A document organizing the boundaries of test phases and the overall picture of deliverables.
+
+- Seven test phase definitions: unit screen, unit API, integration screen, integration API, system, performance/load, and penetration
+- One-to-one correspondence model between test scripts and test specifications
+- Four-tier method classification: generic methods, common methods, screen-specific methods, and test data methods
+- Components of a test specification (case number, perspective, operation steps, expected results, re-execution management)
+- The principle of "never mixing perspectives" in specification design
+
+---
+
+## About `schemas/`
+
+The `schemas/` directory contains structure definition files used in unit module test design.
+Further documentation on this content is planned.
+
+---
+
+## Related Repository
+
+- [mirror-framework](https://github.com/earthHa11Queen/mirror-framework)
+  A design framework for finite test scenario generation using domain definition and boolean operations.
+  It forms the theoretical foundation for the test strategy and scenario generation approach in this guide.
+
+---
+
+## License
+
+[CC BY-SA 4.0](LICENSE)
+
+This repository handles design philosophy and documentation rather than code,
+so the Creative Commons Attribution-ShareAlike license applies.
+When citing, adapting, or redistributing, please credit the original author
+and apply the same license.
+
+---
+
+---
+
+# playwright-framework-guide（日本語）
+
+PlaywrightによるE2Eテスト自動化システムを構築するための設計思想・アーキテクチャガイドです。
+
 1500ケース以上の実装経験から生まれた、Playwright E2Eテスト自動化システムの設計ガイドラインです。
 
 ---
