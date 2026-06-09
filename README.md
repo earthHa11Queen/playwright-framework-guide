@@ -1,30 +1,67 @@
 # playwright-framework-guide
 
-A design philosophy and architecture guide for building E2E test 
-automation systems on top of Playwright.
+A design philosophy and architecture guide for building E2E test automation systems on top of Playwright.
 
-1500ケース以上の実装経験から生まれた設計思想ドキュメントです。
+1500ケース以上の実装経験から生まれた、Playwright E2Eテスト自動化システムの設計ガイドラインです。
+
+---
 
 ## このリポジトリについて
 
-SIer案件での実際の実装経験をもとに体系化した、Playwrightを用いた
-E2Eテスト自動化システムの設計ガイドラインです。
+Playwrightの公式ドキュメントはAPIの使い方を教えてくれますが、
+**1500ケース規模のプロジェクトをどう設計・運用するか**については書かれていません。
 
-Playwrightはブラウザ自動化ライブラリですが、本ガイドはその上に
-構築するテスト自動化システム全体の設計思想を扱います。
+本ガイドは、SIer案件での実際の実装経験をもとに体系化した、
+Playwright **上に構築するテスト自動化システム全体**の設計思想と判断の記録です。
 
-## ドキュメント（順次追加予定）
+「なぜそうするのか」という根拠とともに、ファイル構成・命名規則・データ管理・AI統合まで扱います。
 
-- フレームワーク設計思想（追加予定）
-- テスト戦略（追加予定）
-- 鏡の原理（Mirror Framework）（追加予定）
+---
+
+## ドキュメント
+
+### 1. [フレームワーク設計思想](docs/01_framework-design.md)
+
+Playwrightを用いたE2Eテスト自動化システムの設計原則を解説します。
+
+- テストスクリプトとPage Object の完全分離アーキテクチャ
+- Static Root（静的基盤）と Scope Switching（動的スコープ切り替え）の2層構造
+- 命名規則：`input~` / `check~` / `submit~` / `click~` の統一方針
+- テストデータの管理方針（CSV vs TypeScriptオブジェクト、使い分けの判断基準）
+- AIとPlaywrightの融和性が高い作業領域の整理（補完・レビュー・データ生成など）
+- ループ処理の使用可否ルールと `describe` 2階層以上の必須化
+
+### 2. [テスト戦略](docs/02_test-strategy.md)
+
+テスト工程の区切りと成果物の全体像を整理したドキュメントです。
+
+- 単体画面・単体API・結合画面・結合API・総合・性能負荷・ペネトレーションの7工程定義
+- テストスクリプトとテスト仕様書の1対1対応モデル
+- 汎用メソッド・共通メソッド・固有メソッド・テストデータメソッドの4種分類
+- テスト仕様書の構成要素（ケースナンバー・観点・操作手順・想定結果・再実施管理）
+- 「観点を混ぜ込まない」仕様書設計の原則
+
+---
+
+## schemas について
+
+`schemas/` ディレクトリには、単体のモジュールテスト設計で使用する構造定義ファイルを格納しています。
+今後、この内容についても詳しく記載する予定です。
+
+---
 
 ## 関連リポジトリ
 
-- [mirror-framework](https://github.com/earthHa11Queen/mirror-framework) 
-  - テストシナリオ自動生成のための設計フレームワーク
+- [mirror-framework](https://github.com/earthHa11Queen/mirror-framework)
+  - テストシナリオをドメインとboolean演算で有限算出する設計フレームワーク。
+    本ガイドのテスト戦略・テストシナリオ生成の理論的基盤です。
 
+---
 
-## License
+## ライセンス
 
-CC BY-SA 4.0
+[CC BY-SA 4.0](LICENSE)
+
+本リポジトリはコードではなく設計思想・ドキュメントを扱うため、
+Creative Commons（表示 - 継承）ライセンスを採用しています。
+引用・改変・再配布の際は原著者の表示と同一ライセンスの適用をお願いします。
